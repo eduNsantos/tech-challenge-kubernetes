@@ -1,0 +1,42 @@
+
+resource "aws_security_group" "rds" {
+  name        = "rds"
+  vpc_id      = aws_vpc.main.id
+
+  tags = {
+    Name = "rds"
+  }
+}
+
+resource "aws_security_group" "eks" {
+  name        = "eks"
+  vpc_id      = aws_vpc.main.id
+
+  tags = {
+    Name = "eks"
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "eks" {
+  security_group_id            = aws_security_group.eks.id
+  cidr_ipv4 = var.cidr_block
+
+  from_port                    = 80
+  to_port                      = 80
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "allow_mysql" {
+  security_group_id            = aws_security_group.rds.id
+  referenced_security_group_id = aws_security_group.eks.id
+
+  from_port                    = 3306
+  to_port                      = 3306
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_egress_rule" "allow_all_traffic_ipv4" {
+  security_group_id = aws_security_group.rds.id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1"
+}
