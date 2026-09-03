@@ -1,0 +1,68 @@
+name: Deploy to EKS
+
+on:
+  repository_dispatch:
+    types: [deploy-eks]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy'
+        required: false
+        default: 'latest'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      EKS_CLUSTER_NAME: main
+      NAMESPACE: postech
+      APP_IMAGE: ghcr.io/edunsantos/tech-challenge-application
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: image
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "tag=${{ github.event.client_payload.tag || 'latest' }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.inputs.image_tag || 'latest' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig for EKS
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
+
+      - name: Create GHCR pull secret if needed
+        run: |
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=ghcr.io \
+            --docker-username=${{ secrets.GHCR_USERNAME }} \
+            --docker-password=${{ secrets.GHCR_TOKEN }} \
+            --docker-email=${{ secrets.GHCR_EMAIL }} \
+            --namespace "$NAMESPACE" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Update deployment image
+        run: |
+          kubectl -n "$NAMESPACE" set image deployment/postech-app app=${APP_IMAGE}:${{ steps.image.outputs.tag }}
+
+      - name: Rollout status
+        run: |
+          kubectl -n "$NAMESPACE" rollout status deployment/postech-app --timeout=180s
+
+      - name: Show pods
+        run: kubectl -n "$NAMESPACE" get pods
