@@ -30,7 +30,7 @@ spec:
               echo "MySQL disponivel."
       containers:
         - name: migrate
-          image: ghcr.io/edunsantos/tech-challenge-1:latest
+          image: ghcr.io/edunsantos/tech-challenge-application:latest
           imagePullPolicy: Always
           command:
             - php

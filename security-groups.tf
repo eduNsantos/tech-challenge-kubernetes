@@ -47,6 +47,22 @@ resource "aws_vpc_security_group_ingress_rule" "swagger_my_ip" {
   ip_protocol       = "tcp"
 }
 
+resource "aws_vpc_security_group_ingress_rule" "allow_mysql_vpc" {
+  security_group_id = aws_security_group.rds.id
+  cidr_ipv4         = var.cidr_block
+  from_port         = 3306
+  to_port           = 3306
+  ip_protocol       = "tcp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "allow_mysql_my_ip" {
+  security_group_id = aws_security_group.rds.id
+  cidr_ipv4         = "179.98.123.83/32"
+  from_port         = 3306
+  to_port           = 3306
+  ip_protocol       = "tcp"
+}
+
 resource "aws_vpc_security_group_ingress_rule" "allow_mysql" {
   security_group_id            = aws_security_group.rds.id
   referenced_security_group_id = aws_security_group.eks.id
