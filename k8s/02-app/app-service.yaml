@@ -3,11 +3,11 @@ kind: Service
 metadata:
   name: postech-app
   namespace: postech
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: "sg-09b4b21669d06b2fd"
   labels:
     app: postech-app
 spec:
-  # Use LoadBalancer em ambientes cloud (EKS, GKE, AKS).
-  # Use NodePort para Minikube/Kind local.
   type: LoadBalancer
   selector:
     app: postech-app

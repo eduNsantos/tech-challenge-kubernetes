@@ -56,9 +56,29 @@ jobs:
             --namespace "$NAMESPACE" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Apply non-secret Kubernetes config
+        run: |
+          kubectl apply -f k8s/00-namespaces/
+          kubectl apply -f k8s/01-config/configmap.yaml
+
+      - name: Create app secret from GitHub repository secrets
+        run: |
+          kubectl create secret generic app-secret \
+            --namespace "$NAMESPACE" \
+            --from-literal=APP_KEY="${{ secrets.APP_KEY }}" \
+            --from-literal=DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
+            --from-literal=JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+            --from-literal=MAIL_USERNAME="${{ secrets.MAIL_USERNAME }}" \
+            --from-literal=MAIL_PASSWORD="${{ secrets.MAIL_PASSWORD }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Update deployment image
         run: |
           kubectl -n "$NAMESPACE" set image deployment/postech-app app=${APP_IMAGE}:${{ steps.image.outputs.tag }}
+
+      - name: Trigger rollout
+        run: |
+          kubectl -n "$NAMESPACE" rollout restart deployment/postech-app
 
       - name: Rollout status
         run: |

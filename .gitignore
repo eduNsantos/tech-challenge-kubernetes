@@ -8,3 +8,4 @@ crash.*.log
 # Variables
 *.tfvars
 *.tfvars.json
+k8s/**/secret.yaml
