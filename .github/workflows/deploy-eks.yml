@@ -76,6 +76,10 @@ jobs:
         run: |
           kubectl -n "$NAMESPACE" set image deployment/postech-app app=${APP_IMAGE}:${{ steps.image.outputs.tag }}
 
+      - name: Trigger rollout
+        run: |
+          kubectl -n "$NAMESPACE" rollout restart deployment/postech-app
+
       - name: Rollout status
         run: |
           kubectl -n "$NAMESPACE" rollout status deployment/postech-app --timeout=180s
