@@ -3,8 +3,8 @@ resource "aws_security_group" "rds" {
   name        = "rds"
   vpc_id      = aws_vpc.main.id
 
-    Name = "rds"
   tags = {
+    Name = "rds"
   }
 }
 
