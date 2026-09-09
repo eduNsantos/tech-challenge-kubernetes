@@ -78,7 +78,11 @@ jobs:
           yq eval '.spec.template.spec.containers[0].image = "'"${APP_IMAGE}:${{ steps.image.outputs.tag }}"'"' \
             -i k8s/02-app/migrate-job.yaml
           kubectl apply -f k8s/02-app/migrate-job.yaml
-          kubectl wait --for=condition=complete job/app-migrate -n "$NAMESPACE" --timeout=180s
+          kubectl wait --for=condition=complete job/app-migrate -n "$NAMESPACE" --timeout=180s || {
+            echo "Migration did not complete in time — dumping logs:";
+            kubectl logs job/app-migrate -n "$NAMESPACE" --tail=100 || true;
+            exit 1;
+          }
 
       - name: Update deployment image
         run: |
