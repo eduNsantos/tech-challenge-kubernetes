@@ -72,6 +72,14 @@ jobs:
             --from-literal=MAIL_PASSWORD="${{ secrets.MAIL_PASSWORD }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Run database migrations
+        run: |
+          kubectl delete job app-migrate -n "$NAMESPACE" --ignore-not-found
+          yq eval '.spec.template.spec.containers[0].image = "'"${APP_IMAGE}:${{ steps.image.outputs.tag }}"'"' \
+            -i k8s/02-app/migrate-job.yaml
+          kubectl apply -f k8s/02-app/migrate-job.yaml
+          kubectl wait --for=condition=complete job/app-migrate -n "$NAMESPACE" --timeout=180s
+
       - name: Update deployment image
         run: |
           kubectl -n "$NAMESPACE" set image deployment/postech-app app=${APP_IMAGE}:${{ steps.image.outputs.tag }}
