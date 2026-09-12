@@ -1,11 +1,33 @@
 # tech-challenge-kubernetes
 
-Infraestrutura Terraform do cluster **AWS EKS** + rede (VPC, subnets,
-security groups) e os manifests Kubernetes (`k8s/`) que fazem o deploy real
-de produção da aplicação
+## Propósito
+
+Este repositório provisiona a **infraestrutura de rede e o cluster Kubernetes
+(AWS EKS)** onde o sistema POS roda em produção, e mantém os manifests
+Kubernetes que fazem o deploy da aplicação
 [`tech-challenge-application`](https://github.com/eduNsantos/tech-challenge-application)
-e do Swagger UI. É o **alvo de deploy real** do sistema POS — o `infra/` da
-própria aplicação sobe apenas um Minikube local, para desenvolvimento local.
+e do Swagger UI dentro desse cluster.
+
+Ele é o **alvo real de deploy** do sistema: a VPC, as subnets e os security
+groups criados aqui são consumidos (via `data source` do Terraform) pelos
+repositórios [`tech-challenge-database`](https://github.com/eduNsantos/tech-challenge-database)
+(RDS) e [`tech-challenge-lambda-functions`](https://github.com/eduNsantos/tech-challenge-lambda-functions)
+(função de login). O `infra/` dentro do próprio `tech-challenge-application`
+sobe apenas um Minikube local para desenvolvimento — não faz parte deste
+fluxo de produção.
+
+## Tecnologias utilizadas
+
+| Categoria | Tecnologia |
+| --- | --- |
+| Infraestrutura como código | Terraform (`hashicorp/aws` ~> 6.0) |
+| Provedor cloud | AWS (região `us-east-1`) |
+| Rede | VPC, subnets públicas, Internet Gateway, Security Groups |
+| Orquestração de contêineres | AWS EKS 1.35 + node group EC2 (`t3.small`, 1–2 nós) |
+| Manifests de aplicação | Kubernetes YAML puro (Namespace, ConfigMap, Secret, Deployment, Service, HPA, Job) |
+| Registro de imagens | GitHub Container Registry (GHCR) |
+| CI/CD | GitHub Actions (`.github/workflows/deploy-eks.yml`) |
+| CLI/tooling de deploy | `aws-cli`, `kubectl`, `yq` |
 
 ## Escopo
 
@@ -32,48 +54,127 @@ própria aplicação sobe apenas um Minikube local, para desenvolvimento local.
 | `k8s/02-app/migrate-job.yaml` | Job de `php artisan migrate`, rodado a cada deploy |
 | `k8s/02-app/swagger-deployment.yaml` + `swagger-service.yaml` | Swagger UI servindo o `openapi.yaml` |
 
-## CI/CD
+## Arquitetura
 
-`.github/workflows/deploy-eks.yml`, disparado por `repository_dispatch`
-(evento `deploy-eks`) a partir do `build-ghcr.yml` de
-`tech-challenge-application` — ou manualmente via `workflow_dispatch`. Cada
-execução:
+```mermaid
+flowchart TB
+    subgraph GH["GitHub"]
+        APP_CI["tech-challenge-application\nbuild-ghcr.yml"]
+        GHA["deploy-eks.yml\n(repository_dispatch / workflow_dispatch)"]
+        APP_CI -->|repository_dispatch: deploy-eks| GHA
+    end
 
-1. Configura o kubeconfig do cluster EKS.
-2. Aplica o Secret de pull do GHCR e o ConfigMap.
-3. Recria o Secret `app-secret` a partir dos secrets do repositório GitHub.
-4. Roda o Job de migration (`migrate-job.yaml`) com a imagem nova e espera
-   ele completar.
-5. Atualiza a imagem do Deployment e faz o rollout.
+    subgraph AWS["AWS (us-east-1)"]
+        subgraph VPC["VPC main (10.0.0.0/16)"]
+            IGW["Internet Gateway"]
 
-### Secrets necessários no repositório
+            subgraph SUBA["subnet sub_a (us-east-1a)"]
+                subgraph EKS["EKS Cluster main (v1.35)"]
+                    NG["Node group main-ng\nt3.small, 1-2 nós\nSG: eks"]
 
-`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `GHCR_USERNAME`, `GHCR_TOKEN`,
-`GHCR_EMAIL`, `APP_KEY`, `DB_PASSWORD`, `JWT_SECRET`, `MAIL_USERNAME`,
-`MAIL_PASSWORD`.
+                    subgraph NS["Namespace postech"]
+                        CM["ConfigMap\napp-config / openapi"]
+                        SEC["Secret\napp-secret"]
+                        DEP["Deployment postech-app\n2 réplicas"]
+                        HPA["HPA\n2-4 réplicas / 70% CPU"]
+                        JOB["Job app-migrate\nphp artisan migrate"]
+                        SWG["Deployment/Service\nswagger-ui"]
+                        SVC["Service postech-app\nLoadBalancer :8080"]
 
-## Rodar/aplicar localmente
+                        CM --> DEP
+                        SEC --> DEP
+                        JOB --> DEP
+                        HPA -.-> DEP
+                        DEP --> SVC
+                    end
+                end
+            end
+
+            subgraph SUBB["subnet sub_b (us-east-1b)"]
+                RDSNOTE["(sem recursos próprios\nsó AZ de failover do EKS)"]
+            end
+
+            SGRDS["Security Group rds\n:3306 liberado p/ SG eks"]
+        end
+
+        IGW --- VPC
+    end
+
+    RDS["RDS MySQL\n(tech-challenge-database)"]
+    LAMBDA["Lambda auth-login\n(tech-challenge-lambda-functions)"]
+    GHCR["GHCR\nghcr.io/edunsantos/tech-challenge-application"]
+    USER["Usuário / Internet"]
+
+    GHA -->|"aws eks update-kubeconfig\n+ kubectl apply"| NS
+    GHCR -->|pull image| DEP
+    DEP -.->|DB_HOST| RDS
+    SGRDS -.->|referencia SG eks| NG
+    LAMBDA -.->|data source: VPC/subnets/SG| VPC
+    RDS -.->|data source: VPC/subnets/SG rds| SGRDS
+    USER -->|":8080 app /\n:8082 swagger"| SVC
+    SVC --> IGW
+```
+
+- **Rede:** uma única VPC (`main`) com duas subnets públicas em AZs
+  diferentes (alta disponibilidade do EKS); o Internet Gateway expõe o
+  LoadBalancer do Service da aplicação.
+- **Cluster:** o node group EC2 roda todos os pods do namespace `postech`
+  (app Laravel, Swagger UI e o Job de migration, este último efêmero a cada
+  deploy).
+- **Fronteira com os outros repositórios:** os Security Groups `eks` e `rds`
+  e a VPC são criados aqui e apenas **lidos** (`data source`, nunca
+  recriados) pelos repositórios `tech-challenge-database` e
+  `tech-challenge-lambda-functions`.
+
+## Passos para execução e deploy
+
+### 1. Provisionar a infraestrutura (uma vez, ou a cada mudança de Terraform)
 
 ```bash
-# Infraestrutura (VPC + EKS)
 terraform init
 terraform plan
 terraform apply
+```
 
-# Configura acesso ao cluster criado
+### 2. Configurar acesso ao cluster
+
+```bash
 aws eks update-kubeconfig --name main --region us-east-1
+```
 
-# Aplica os manifests, na ordem
+### 3. Aplicar os manifests Kubernetes (ordem importa)
+
+```bash
 kubectl apply -f k8s/00-namespaces/
 kubectl apply -f k8s/01-config/configmap.yaml
 kubectl create configmap openapi-spec --from-file=openapi.yaml -n postech
 
 cp k8s/01-config/secret.example.yaml k8s/01-config/secret.yaml
 # preencha secret.yaml com valores reais em base64 — nunca commitar
-kubectl apply -f k8s/01-config/secret.yaml
 
+kubectl apply -f k8s/01-config/secret.yaml
 kubectl apply -f k8s/02-app/
 ```
+
+### 4. Deploy contínuo (automático)
+
+O deploy de uma nova versão da aplicação **não é manual**: o workflow
+`.github/workflows/deploy-eks.yml` é disparado por `repository_dispatch`
+(evento `deploy-eks`) enviado pelo `build-ghcr.yml` de
+`tech-challenge-application` após cada publicação de imagem no GHCR — ou
+manualmente via `workflow_dispatch`, informando a tag da imagem. A cada
+execução, o workflow:
+
+1. Configura o kubeconfig do cluster EKS.
+2. Cria/atualiza o Secret de pull do GHCR e o ConfigMap.
+3. Recria o Secret `app-secret` a partir dos secrets do repositório GitHub.
+4. Roda o Job de migration (`migrate-job.yaml`) com a imagem nova e espera
+   ele completar.
+5. Atualiza a imagem do Deployment e faz o rollout.
+
+**Secrets necessários no repositório GitHub:** `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `GHCR_USERNAME`, `GHCR_TOKEN`, `GHCR_EMAIL`,
+`APP_KEY`, `DB_PASSWORD`, `JWT_SECRET`, `MAIL_USERNAME`, `MAIL_PASSWORD`.
 
 ## Acesso
 
