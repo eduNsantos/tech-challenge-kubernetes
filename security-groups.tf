@@ -30,22 +30,22 @@ resource "aws_vpc_security_group_egress_rule" "eks" {
 
   ip_protocol = "-1"
 }
-
-resource "aws_vpc_security_group_ingress_rule" "allow_app_my_ip" {
+resource "aws_vpc_security_group_ingress_rule" "eks_all" {
   security_group_id = aws_security_group.eks.id
-  cidr_ipv4         = "179.98.123.83/32"
+  cidr_ipv4         = "0.0.0.0/0"
   from_port         = 8080
-  to_port           = 8080
+  to_port           = 8082
   ip_protocol       = "tcp"
 }
 
-resource "aws_vpc_security_group_ingress_rule" "swagger_my_ip" {
-  security_group_id = aws_security_group.eks.id
-  cidr_ipv4         = "179.98.123.83/32"
+resource "aws_vpc_security_group_ingress_rule" "rds_all" {
+  security_group_id = aws_security_group.rds.id
+  cidr_ipv4         = "0.0.0.0/0"
   from_port         = 8082
   to_port           = 8082
   ip_protocol       = "tcp"
 }
+
 
 resource "aws_vpc_security_group_ingress_rule" "allow_mysql_vpc" {
   security_group_id = aws_security_group.rds.id
@@ -55,13 +55,6 @@ resource "aws_vpc_security_group_ingress_rule" "allow_mysql_vpc" {
   ip_protocol       = "tcp"
 }
 
-resource "aws_vpc_security_group_ingress_rule" "allow_mysql_my_ip" {
-  security_group_id = aws_security_group.rds.id
-  cidr_ipv4         = "179.98.123.83/32"
-  from_port         = 3306
-  to_port           = 3306
-  ip_protocol       = "tcp"
-}
 
 resource "aws_vpc_security_group_ingress_rule" "allow_mysql" {
   security_group_id            = aws_security_group.rds.id

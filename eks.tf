@@ -20,30 +20,6 @@ resource "aws_eks_cluster" "main" {
   ]
 }
 
-resource "aws_eks_access_entry" "eduardo" {
-  cluster_name  = aws_eks_cluster.main.name
-  principal_arn = "arn:aws:iam::477478162709:user/eduardo"
-
-  depends_on = [
-    aws_eks_cluster.main
-  ]
-}
-
-resource "aws_eks_access_policy_association" "eduardo_admin" {
-  cluster_name  = aws_eks_cluster.main.name
-  principal_arn = aws_eks_access_entry.eduardo.principal_arn
-
-  policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-
-  access_scope {
-    type = "cluster"
-  }
-
-  depends_on = [
-    aws_eks_access_entry.eduardo
-  ]
-}
-
 resource "aws_iam_role" "cluster" {
   name = "eks-cluster"
   assume_role_policy = jsonencode({
@@ -107,9 +83,9 @@ resource "aws_eks_node_group" "main" {
   subnet_ids      = [aws_subnet.sub_a.id, aws_subnet.sub_b.id]
 
   scaling_config {
-    desired_size = 2
-    max_size     = 2
-    min_size     = 1
+    desired_size = 1
+    max_size     = 1
+    min_size     = 0
   }
 
   instance_types = ["t3.small"]
