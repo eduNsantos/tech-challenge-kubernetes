@@ -63,6 +63,10 @@ jobs:
 
       - name: Create app secret from GitHub repository secrets
         run: |
+          kubectl delete secret ghcr-secret \
+            -n postech \
+            --ignore-not-found
+
           kubectl create secret generic ghcr-secret \
             --namespace "$NAMESPACE" \
             --from-literal=APP_KEY="${{ secrets.APP_KEY }}" \
