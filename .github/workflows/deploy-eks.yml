@@ -248,6 +248,7 @@ jobs:
             --from-literal=MAIL_USERNAME="$MAIL_USERNAME" \
             --from-literal=MAIL_PASSWORD="$MAIL_PASSWORD" \
             --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
+            --from-literal=NEW_RELIC_ENABLED="true" \
             --from-literal=NEW_RELIC_KEY="$NEW_RELIC_KEY" \
             --from-literal=NEW_RELIC_API_KEY="$NEW_RELIC_API_KEY" \
             --from-literal=NEW_RELIC_ACCOUNT_ID="$NEW_RELIC_ACCOUNT_ID" \
