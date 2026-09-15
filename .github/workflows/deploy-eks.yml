@@ -103,6 +103,7 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          NEW_RELIC_ENABLED: ${{ secrets.NEW_RELIC_ENABLED }}
           NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
           NEW_RELIC_KEY: ${{ secrets.NEW_RELIC_KEY }}
           NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
@@ -202,6 +203,13 @@ jobs:
       # ---------------------------------------------------------
       # ROLLOUT
       # ---------------------------------------------------------
+
+      - name: Rollout deployment
+        run: |
+          kubectl rollout restart \
+            deployment/postech-app \
+            -n "$NAMESPACE"
+
       - name: Rollout status
         run: |
           kubectl rollout status \
