@@ -3,6 +3,7 @@ name: Deploy to EKS
 on:
   repository_dispatch:
     types: [deploy-eks]
+
   workflow_dispatch:
     inputs:
       image_tag:
@@ -27,15 +28,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ---------------------------------------------------------
+      # IMAGE TAG
+      # ---------------------------------------------------------
       - name: Set image tag
         id: image
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ github.event.client_payload.tag }}
+          INPUT_TAG: ${{ github.event.inputs.image_tag }}
         run: |
-          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            echo "tag=${{ github.event.client_payload.tag || 'latest' }}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "repository_dispatch" ]; then
+            TAG="${DISPATCH_TAG:-latest}"
           else
-            echo "tag=${{ github.event.inputs.image_tag || 'latest' }}" >> "$GITHUB_OUTPUT"
+            TAG="${INPUT_TAG:-latest}"
           fi
 
+          echo "Deploying image tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------
+      # AWS
+      # ---------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -44,57 +58,170 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Update kubeconfig for EKS
-        run: aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
-
-      - name: Create GHCR pull secret if needed
         run: |
-          kubectl create secret docker-registry ghcr-secret \
-            --docker-server=ghcr.io \
-            --docker-username=${{ secrets.GHCR_USERNAME }} \
-            --docker-password=${{ secrets.GHCR_TOKEN }} \
-            --docker-email=${{ secrets.GHCR_EMAIL }} \
-            --namespace "$NAMESPACE" \
-            --dry-run=client -o yaml | kubectl apply -f -
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION"
 
+      # ---------------------------------------------------------
+      # NAMESPACE + CONFIGMAP
+      # ---------------------------------------------------------
       - name: Apply non-secret Kubernetes config
         run: |
           kubectl apply -f k8s/00-namespaces/
           kubectl apply -f k8s/01-config/configmap.yaml
 
-      - name: Create app secret from GitHub repository secrets
+      # ---------------------------------------------------------
+      # GHCR SECRET
+      # ---------------------------------------------------------
+      - name: Create GHCR pull secret
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_EMAIL: ${{ secrets.GHCR_EMAIL }}
         run: |
-          kubectl create secret generic app-secret \
+          kubectl delete secret ghcr-secret \
+            -n "$NAMESPACE" \
+            --ignore-not-found
+
+          kubectl create secret docker-registry ghcr-secret \
+            --docker-server=ghcr.io \
+            --docker-username="$GHCR_USERNAME" \
+            --docker-password="$GHCR_TOKEN" \
+            --docker-email="$GHCR_EMAIL" \
             --namespace "$NAMESPACE" \
-            --from-literal=APP_KEY="${{ secrets.APP_KEY }}" \
-            --from-literal=DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
-            --from-literal=JWT_SECRET="${{ secrets.JWT_SECRET }}" \
-            --from-literal=MAIL_USERNAME="${{ secrets.MAIL_USERNAME }}" \
-            --from-literal=MAIL_PASSWORD="${{ secrets.MAIL_PASSWORD }}" \
-            --dry-run=client -o yaml | kubectl apply -f -
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
 
+      # ---------------------------------------------------------
+      # APPLICATION SECRETS
+      # ---------------------------------------------------------
+      - name: Create application secret
+        env:
+          APP_KEY: ${{ secrets.APP_KEY }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          NEW_RELIC_KEY: ${{ secrets.NEW_RELIC_KEY }}
+          NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
+          NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+        run: |
+
+          kubectl delete secret app-secrets \
+            -n "$NAMESPACE" \
+            --ignore-not-found
+
+          kubectl create secret generic app-secrets \
+            --namespace "$NAMESPACE" \
+            --from-literal=APP_KEY="$APP_KEY" \
+            --from-literal=DB_PASSWORD="$DB_PASSWORD" \
+            --from-literal=JWT_SECRET="$JWT_SECRET" \
+            --from-literal=MAIL_USERNAME="$MAIL_USERNAME" \
+            --from-literal=MAIL_PASSWORD="$MAIL_PASSWORD" \
+            --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
+            --from-literal=NEW_RELIC_KEY="$NEW_RELIC_KEY" \
+            --from-literal=NEW_RELIC_API_KEY="$NEW_RELIC_API_KEY" \
+            --from-literal=NEW_RELIC_ACCOUNT_ID="$NEW_RELIC_ACCOUNT_ID" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+      # ---------------------------------------------------------
+      # DATABASE MIGRATION
+      # ---------------------------------------------------------
       - name: Run database migrations
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: |
-          kubectl delete job app-migrate -n "$NAMESPACE" --ignore-not-found
-          yq eval '.spec.template.spec.containers[0].image = "'"${APP_IMAGE}:${{ steps.image.outputs.tag }}"'"' \
-            -i k8s/02-app/migrate-job.yaml
-          kubectl apply -f k8s/02-app/migrate-job.yaml
-          kubectl wait --for=condition=complete job/app-migrate -n "$NAMESPACE" --timeout=180s || {
-            echo "Migration did not complete in time — dumping logs:";
-            kubectl logs job/app-migrate -n "$NAMESPACE" --tail=100 || true;
-            exit 1;
-          }
+          echo "Running migration with:"
+          echo "${APP_IMAGE}:${IMAGE_TAG}"
 
-      - name: Update deployment image
+          # Job é imutável, então sempre removemos o anterior
+          kubectl delete job app-migrate \
+            -n "$NAMESPACE" \
+            --ignore-not-found
+
+          # Gera um arquivo temporário para não alterar
+          # o migrate-job.yaml do repositório
+          yq eval \
+            '.spec.template.spec.containers[0].image = env(APP_IMAGE) + ":" + env(IMAGE_TAG)' \
+            k8s/02-app/migrate-job.yaml \
+            > /tmp/migrate-job.yaml
+
+          kubectl apply -f /tmp/migrate-job.yaml
+
+          echo "Waiting for migration..."
+
+          if ! kubectl wait \
+            --for=condition=complete \
+            job/app-migrate \
+            -n "$NAMESPACE" \
+            --timeout=180s; then
+
+            echo "Migration failed."
+
+            kubectl describe job app-migrate \
+              -n "$NAMESPACE" || true
+
+            echo "Migration logs:"
+
+            kubectl logs \
+              job/app-migrate \
+              -n "$NAMESPACE" \
+              --tail=200 || true
+
+            exit 1
+          fi
+
+          echo "Migration completed successfully."
+
+          kubectl logs \
+            job/app-migrate \
+            -n "$NAMESPACE" \
+            --tail=200
+
+      - name: Apply Application
         run: |
-          kubectl -n "$NAMESPACE" set image deployment/postech-app app=${APP_IMAGE}:${{ steps.image.outputs.tag }}
+          kubectl apply -f k8s/02-app
 
-      - name: Trigger rollout
+      # ---------------------------------------------------------
+      # NEW RELIC
+      # ---------------------------------------------------------
+      - name: Deploy New Relic Kubernetes integration
         run: |
-          kubectl -n "$NAMESPACE" rollout restart deployment/postech-app
+          set -euo pipefail
 
+          helm repo add newrelic https://helm-charts.newrelic.com || true
+          helm repo update
+
+          helm upgrade --install newrelic-bundle \
+            newrelic/nri-bundle \
+            --namespace "$NAMESPACE" \
+            -f newrelic-values.yaml
+      # ---------------------------------------------------------
+      # ROLLOUT
+      # ---------------------------------------------------------
       - name: Rollout status
         run: |
-          kubectl -n "$NAMESPACE" rollout status deployment/postech-app --timeout=180s
+          kubectl rollout status \
+            deployment/postech-app \
+            -n "$NAMESPACE" \
+            --timeout=180s
 
+      # ---------------------------------------------------------
+      # SHOW PODS
+      # ---------------------------------------------------------
       - name: Show pods
-        run: kubectl -n "$NAMESPACE" get pods
+        run: |
+          kubectl get pods \
+            -n "$NAMESPACE" \
+            -o wide
+
+      - name: Show deployment image
+        run: |
+          kubectl get deployment postech-app \
+            -n "$NAMESPACE" \
+            -o jsonpath='{.spec.template.spec.containers[*].image}'
+
+          echo
