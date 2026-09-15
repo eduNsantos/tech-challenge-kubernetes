@@ -48,7 +48,7 @@ fluxo de produção.
 | `k8s/01-config/configmap.yaml` | Variáveis de ambiente da app Laravel (`DB_HOST` aponta para a RDS de `tech-challenge-database`) |
 | `k8s/01-config/openapi-configmap.yaml` | ConfigMap com o `openapi.yaml` servido pelo Swagger UI |
 | `k8s/01-config/secret.example.yaml` | Modelo do Secret `ghcr-secret` (`APP_KEY`, `DB_PASSWORD`, `JWT_SECRET`, `MAIL_*`) — nunca commitar o real |
-| `k8s/02-app/app-deployment.yaml` | Deployment da app Laravel (2 réplicas, probes em `/up`) |
+| `k8s/02-app/app-deployment.yaml` | Deployment da app Laravel (2 réplicas, probes em `/health`) |
 | `k8s/02-app/app-service.yaml` | Service `LoadBalancer`, porta 8080 |
 | `k8s/02-app/app-hpa.yaml` | HPA: 2–4 réplicas, alvo 70% de CPU |
 | `k8s/02-app/migrate-job.yaml` | Job de `php artisan migrate`, rodado a cada deploy |
