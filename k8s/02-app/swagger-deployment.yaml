@@ -39,5 +39,4 @@ spec:
           configMap:
             name: openapi-spec
 ---
-# Para criar o ConfigMap com o arquivo openapi.yaml, execute:
-# kubectl create configmap openapi-spec --from-file=openapi.yaml -n postech
+# O ConfigMap do Swagger é gerenciado em k8s/01-config/openapi-configmap.yaml
