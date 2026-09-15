@@ -102,12 +102,12 @@ resource "aws_eks_node_group" "main" {
   subnet_ids      = [aws_subnet.sub_a.id, aws_subnet.sub_b.id]
 
   scaling_config {
-    desired_size = 1
-    max_size     = 1
-    min_size     = 0
+    desired_size = 2
+    max_size     = 3
+    min_size     = 1
   }
 
-  instance_types = ["t3.small"]
+  instance_types = ["t3.medium"]
 
   depends_on = [
     aws_iam_role_policy_attachment.node_AmazonEKSWorkerNodePolicy,
