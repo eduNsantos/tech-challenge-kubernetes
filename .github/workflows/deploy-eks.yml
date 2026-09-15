@@ -58,7 +58,6 @@ jobs:
           terraform init -input=false
 
       - name: Terraform Apply
-        working-directory: terraform
         env:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
