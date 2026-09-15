@@ -182,21 +182,6 @@ jobs:
             --tail=200
 
       # ---------------------------------------------------------
-      # DEPLOY APPLICATION
-      # ---------------------------------------------------------
-      - name: Update application image
-        env:
-          IMAGE_TAG: ${{ steps.image.outputs.tag }}
-        run: |
-          echo "Updating deployment image:"
-          echo "${APP_IMAGE}:${IMAGE_TAG}"
-
-          kubectl set image \
-            deployment/postech-app \
-            postech-app="${APP_IMAGE}:${IMAGE_TAG}" \
-            -n "$NAMESPACE"
-
-      # ---------------------------------------------------------
       # ROLLOUT
       # ---------------------------------------------------------
       - name: Rollout status
