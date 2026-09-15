@@ -417,8 +417,24 @@ jobs:
             --name "$EKS_CLUSTER_NAME" \
             --region "$AWS_REGION"
 
+
       - name: Install Helm
         uses: azure/setup-helm@v4
+
+      - name: Cleanup conflicting New Relic webhook
+        run: |
+          set -euo pipefail
+
+          WEBHOOK="newrelic-bundle-nri-metadata-injection"
+
+          if kubectl get mutatingwebhookconfiguration "$WEBHOOK" >/dev/null 2>&1; then
+            echo "Removing stale New Relic webhook: $WEBHOOK"
+
+            kubectl delete mutatingwebhookconfiguration "$WEBHOOK" \
+              --ignore-not-found=true
+          else
+            echo "New Relic webhook does not exist."
+          fi
 
       - name: Deploy New Relic Kubernetes integration
         run: |
@@ -433,7 +449,8 @@ jobs:
             newrelic/nri-bundle \
             --namespace "$NAMESPACE" \
             --create-namespace \
-            -f newrelic-values.yaml
+            -f newrelic-values.yaml \
+            --timeout 10m
 
 
   # =======================================================
