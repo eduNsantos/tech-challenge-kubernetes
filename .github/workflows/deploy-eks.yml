@@ -19,33 +19,32 @@ permissions:
   contents: read
 
 # ---------------------------------------------------------
-# EVITA DOIS TERRAFORM RODANDO AO MESMO TEMPO
+# EVITA DOIS PIPELINES DE INFRA RODANDO AO MESMO TEMPO
 # ---------------------------------------------------------
 concurrency:
   group: terraform-eks-state
   cancel-in-progress: false
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: main
+  NAMESPACE: postech
+  APP_IMAGE: ghcr.io/edunsantos/tech-challenge-application
 
-    env:
-      AWS_REGION: us-east-1
-      EKS_CLUSTER_NAME: main
-      NAMESPACE: postech
-      APP_IMAGE: ghcr.io/edunsantos/tech-challenge-application
+# =========================================================
+# TERRAFORM
+# =========================================================
+jobs:
+
+  terraform:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
 
     steps:
 
-      # ---------------------------------------------------------
-      # CHECKOUT
-      # ---------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---------------------------------------------------------
-      # AWS
-      # ---------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -53,9 +52,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ---------------------------------------------------------
-      # TERRAFORM
-      # ---------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -63,9 +59,6 @@ jobs:
 
       - name: Terraform Init
         run: |
-          rm -rf .terraform
-          rm -f terraform.tfstate terraform.tfstate.backup
-
           terraform init \
             -input=false \
             -reconfigure \
@@ -79,11 +72,22 @@ jobs:
         run: |
           terraform apply \
             -auto-approve \
-            -lock-timeout=1m
+            -input=false \
+            -lock-timeout=5m
 
-      # ---------------------------------------------------------
-      # IMAGE TAG
-      # ---------------------------------------------------------
+
+  # =======================================================
+  # IMAGE TAG
+  # =======================================================
+  image:
+    name: Define Image Tag
+    runs-on: ubuntu-latest
+
+    outputs:
+      tag: ${{ steps.image.outputs.tag }}
+
+    steps:
+
       - name: Set image tag
         id: image
         env:
@@ -100,36 +104,118 @@ jobs:
           echo "Deploying image tag: $TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      # ---------------------------------------------------------
-      # EKS
-      # ---------------------------------------------------------
-      - name: Update kubeconfig for EKS
+
+  # =======================================================
+  # EKS
+  # =======================================================
+  eks:
+    name: Configure EKS
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig \
             --name "$EKS_CLUSTER_NAME" \
             --region "$AWS_REGION"
 
-      # ---------------------------------------------------------
-      # NAMESPACE + CONFIGMAP
-      # ---------------------------------------------------------
-      - name: Apply non-secret Kubernetes config
+      - name: Check cluster
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+
+
+  # =======================================================
+  # CONFIGMAP / NAMESPACE
+  # =======================================================
+  config:
+    name: Apply Kubernetes Config
+    runs-on: ubuntu-latest
+    needs: eks
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+      - name: Apply namespace
         run: |
           kubectl apply -f k8s/00-namespaces/
+
+      - name: Apply ConfigMap
+        run: |
           kubectl apply -f k8s/01-config/configmap.yaml
 
-      # ---------------------------------------------------------
-      # GHCR SECRET
-      # ---------------------------------------------------------
+
+  # =======================================================
+  # SECRETS
+  # =======================================================
+  secrets:
+    name: Apply Kubernetes Secrets
+    runs-on: ubuntu-latest
+    needs: config
+
+    steps:
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+      # ---------------------------------------------------
+      # GHCR
+      # ---------------------------------------------------
       - name: Create GHCR pull secret
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           GHCR_EMAIL: ${{ secrets.GHCR_EMAIL }}
         run: |
-          kubectl delete secret ghcr-secret \
-            -n "$NAMESPACE" \
-            --ignore-not-found
-
           kubectl create secret docker-registry ghcr-secret \
             --docker-server=ghcr.io \
             --docker-username="$GHCR_USERNAME" \
@@ -139,9 +225,9 @@ jobs:
             --dry-run=client \
             -o yaml | kubectl apply -f -
 
-      # ---------------------------------------------------------
-      # APPLICATION SECRETS
-      # ---------------------------------------------------------
+      # ---------------------------------------------------
+      # APPLICATION
+      # ---------------------------------------------------
       - name: Create application secret
         env:
           APP_KEY: ${{ secrets.APP_KEY }}
@@ -149,16 +235,11 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
-          NEW_RELIC_ENABLED: ${{ secrets.NEW_RELIC_ENABLED }}
           NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
           NEW_RELIC_KEY: ${{ secrets.NEW_RELIC_KEY }}
           NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
           NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
         run: |
-          kubectl delete secret app-secrets \
-            -n "$NAMESPACE" \
-            --ignore-not-found
-
           kubectl create secret generic app-secrets \
             --namespace "$NAMESPACE" \
             --from-literal=APP_KEY="$APP_KEY" \
@@ -173,14 +254,49 @@ jobs:
             --dry-run=client \
             -o yaml | kubectl apply -f -
 
-      # ---------------------------------------------------------
-      # DATABASE MIGRATION
-      # ---------------------------------------------------------
-      - name: Run database migrations
-        env:
-          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+
+  # =======================================================
+  # DATABASE MIGRATION
+  # =======================================================
+  migration:
+    name: Database Migration
+    runs-on: ubuntu-latest
+    needs:
+      - secrets
+      - image
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Update kubeconfig
         run: |
-          echo "Running migration with:"
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+      - name: Install yq
+        uses: mikefarah/yq@v4
+
+      - name: Run database migration
+        env:
+          IMAGE_TAG: ${{ needs.image.outputs.tag }}
+        run: |
+
+          echo "Running migration:"
           echo "${APP_IMAGE}:${IMAGE_TAG}"
 
           kubectl delete job app-migrate \
@@ -224,32 +340,143 @@ jobs:
             -n "$NAMESPACE" \
             --tail=200
 
-      # ---------------------------------------------------------
-      # APPLICATION
-      # ---------------------------------------------------------
-      - name: Apply Application
-        run: |
-          kubectl apply -f k8s/02-app
 
-      # ---------------------------------------------------------
-      # NEW RELIC
-      # ---------------------------------------------------------
+  # =======================================================
+  # APPLICATION
+  # =======================================================
+  deploy:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    needs:
+      - migration
+      - image
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+      - name: Install yq
+        uses: mikefarah/yq@v4
+
+      - name: Set application image
+        env:
+          IMAGE_TAG: ${{ needs.image.outputs.tag }}
+        run: |
+          yq eval \
+            '.spec.template.spec.containers[0].image = env(APP_IMAGE) + ":" + env(IMAGE_TAG)' \
+            k8s/02-app/deployment.yaml \
+            > /tmp/deployment.yaml
+
+          kubectl apply -f /tmp/deployment.yaml
+
+      - name: Apply remaining application manifests
+        run: |
+          find k8s/02-app \
+            -type f \
+            ! -name "deployment.yaml" \
+            -exec kubectl apply -f {} \;
+
+
+  # =======================================================
+  # NEW RELIC
+  # =======================================================
+  newrelic:
+    name: Deploy New Relic
+    runs-on: ubuntu-latest
+    needs: eks
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
       - name: Deploy New Relic Kubernetes integration
         run: |
           set -euo pipefail
 
-          helm repo add newrelic https://helm-charts.newrelic.com || true
+          helm repo add newrelic \
+            https://helm-charts.newrelic.com || true
+
           helm repo update
 
           helm upgrade --install newrelic-bundle \
             newrelic/nri-bundle \
             --namespace "$NAMESPACE" \
+            --create-namespace \
             -f newrelic-values.yaml
 
-      # ---------------------------------------------------------
-      # ROLLOUT
-      # ---------------------------------------------------------
-      - name: Rollout deployment
+
+  # =======================================================
+  # ROLLOUT
+  # =======================================================
+  rollout:
+    name: Rollout Application
+    runs-on: ubuntu-latest
+    needs:
+      - deploy
+      - newrelic
+
+    steps:
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+      - name: Restart deployment
         run: |
           kubectl rollout restart \
             deployment/postech-app \
@@ -262,9 +489,6 @@ jobs:
             -n "$NAMESPACE" \
             --timeout=180s
 
-      # ---------------------------------------------------------
-      # SHOW PODS
-      # ---------------------------------------------------------
       - name: Show pods
         run: |
           kubectl get pods \
@@ -275,6 +499,6 @@ jobs:
         run: |
           kubectl get deployment postech-app \
             -n "$NAMESPACE" \
-            -o jsonpath='{.spec.template.spec.containers[*].image}'
+            -o jsonpath='{.spec.template.spec.containers[*].image'
 
           echo
