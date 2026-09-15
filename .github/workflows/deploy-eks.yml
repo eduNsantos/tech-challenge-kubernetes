@@ -18,6 +18,13 @@ on:
 permissions:
   contents: read
 
+# ---------------------------------------------------------
+# EVITA DOIS TERRAFORM RODANDO AO MESMO TEMPO
+# ---------------------------------------------------------
+concurrency:
+  group: terraform-eks-state
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -29,6 +36,7 @@ jobs:
       APP_IMAGE: ghcr.io/edunsantos/tech-challenge-application
 
     steps:
+
       # ---------------------------------------------------------
       # CHECKOUT
       # ---------------------------------------------------------
@@ -55,7 +63,9 @@ jobs:
 
       - name: Terraform Init
         run: |
-          terraform init -input=false
+          terraform init \
+            -input=false \
+            -lock-timeout=5m
 
       - name: Terraform Apply
         env:
@@ -65,7 +75,8 @@ jobs:
         run: |
           terraform apply \
             -auto-approve \
-            -input=false
+            -input=false \
+            -lock-timeout=5m
 
       # ---------------------------------------------------------
       # IMAGE TAG
