@@ -501,11 +501,3 @@ jobs:
           kubectl get pods \
             -n "$NAMESPACE" \
             -o wide
-
-      - name: Show deployment image
-        run: |
-          kubectl get deployment postech-app \
-            -n "$NAMESPACE" \
-            -o jsonpath='{.spec.template.spec.containers[*].image'
-
-          echo
