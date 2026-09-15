@@ -63,13 +63,17 @@ jobs:
 
       - name: Create app secret from GitHub repository secrets
         run: |
-          kubectl create secret generic app-secret \
+          kubectl create secret generic ghcr-secret \
             --namespace "$NAMESPACE" \
             --from-literal=APP_KEY="${{ secrets.APP_KEY }}" \
             --from-literal=DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
             --from-literal=JWT_SECRET="${{ secrets.JWT_SECRET }}" \
             --from-literal=MAIL_USERNAME="${{ secrets.MAIL_USERNAME }}" \
             --from-literal=MAIL_PASSWORD="${{ secrets.MAIL_PASSWORD }}" \
+            --from-literal=NEW_RELIC_LICENSE_KEY="${{ secrets.NEW_RELIC_LICENSE_KEY }}" \
+            --from-literal=NEW_RELIC_KEY="${{ secrets.NEW_RELIC_KEY }}" \
+            --from-literal=NEW_RELIC_API_KEY="${{ secrets.NEW_RELIC_API_KEY }}" \
+            --from-literal=NEW_RELIC_ACCOUNT_ID="${{ secrets.NEW_RELIC_ACCOUNT_ID }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Run database migrations

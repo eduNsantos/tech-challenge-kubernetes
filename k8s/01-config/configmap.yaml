@@ -24,3 +24,6 @@ data:
   MAIL_PORT: "587"
   MAIL_FROM_ADDRESS: "evdwsoat15@gmail.com"
   MAIL_FROM_NAME: "POS Tech"
+  NEW_RELIC_APP_NAME: "Tech Challenge POS"
+  NEW_RELIC_ENABLED: "true"
+  NEW_RELIC_DAEMON_ADDRESS: "newrelic:31339"

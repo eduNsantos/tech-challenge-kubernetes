@@ -47,7 +47,7 @@ fluxo de produção.
 | `k8s/00-namespaces/namespace.yaml` | Namespace `postech` |
 | `k8s/01-config/configmap.yaml` | Variáveis de ambiente da app Laravel (`DB_HOST` aponta para a RDS de `tech-challenge-database`) |
 | `k8s/01-config/openapi-configmap.yaml` | ConfigMap com o `openapi.yaml` servido pelo Swagger UI |
-| `k8s/01-config/secret.example.yaml` | Modelo do Secret `app-secret` (`APP_KEY`, `DB_PASSWORD`, `JWT_SECRET`, `MAIL_*`) — nunca commitar o real |
+| `k8s/01-config/secret.example.yaml` | Modelo do Secret `ghcr-secret` (`APP_KEY`, `DB_PASSWORD`, `JWT_SECRET`, `MAIL_*`) — nunca commitar o real |
 | `k8s/02-app/app-deployment.yaml` | Deployment da app Laravel (2 réplicas, probes em `/up`) |
 | `k8s/02-app/app-service.yaml` | Service `LoadBalancer`, porta 8080 |
 | `k8s/02-app/app-hpa.yaml` | HPA: 2–4 réplicas, alvo 70% de CPU |
@@ -74,7 +74,7 @@ flowchart TB
 
                     subgraph NS["Namespace postech"]
                         CM["ConfigMap\napp-config / openapi"]
-                        SEC["Secret\napp-secret"]
+                        SEC["Secret\nghcr-secret"]
                         DEP["Deployment postech-app\n2 réplicas"]
                         HPA["HPA\n2-4 réplicas / 70% CPU"]
                         JOB["Job app-migrate\nphp artisan migrate"]
@@ -167,7 +167,7 @@ execução, o workflow:
 
 1. Configura o kubeconfig do cluster EKS.
 2. Cria/atualiza o Secret de pull do GHCR e o ConfigMap.
-3. Recria o Secret `app-secret` a partir dos secrets do repositório GitHub.
+3. Recria o Secret `ghcr-secret` a partir dos secrets do repositório GitHub.
 4. Roda o Job de migration (`migrate-job.yaml`) com a imagem nova e espera
    ele completar.
 5. Atualiza a imagem do Deployment e faz o rollout.

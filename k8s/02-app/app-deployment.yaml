@@ -33,7 +33,7 @@ spec:
             - configMapRef:
                 name: app-config
             - secretRef:
-                name: app-secret
+                name: ghcr-secret
           livenessProbe:
             httpGet:
               path: /up

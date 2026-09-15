@@ -1,3 +1,5 @@
+data "aws_caller_identity" "current" {}
+
 resource "aws_eks_cluster" "main" {
   name = "main"
 
@@ -18,6 +20,23 @@ resource "aws_eks_cluster" "main" {
   depends_on = [
     aws_iam_role_policy_attachment.cluster_AmazonEKSClusterPolicy,
   ]
+}
+
+resource "aws_eks_access_entry" "terraform_user" {
+  cluster_name      = aws_eks_cluster.main.name
+  principal_arn     = data.aws_caller_identity.current.arn
+  type              = "STANDARD"
+  kubernetes_groups = []
+}
+
+resource "aws_eks_access_policy_association" "terraform_user_admin" {
+  cluster_name  = aws_eks_cluster.main.name
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+  principal_arn = aws_eks_access_entry.terraform_user.principal_arn
+
+  access_scope {
+    type = "cluster"
+  }
 }
 
 resource "aws_iam_role" "cluster" {
