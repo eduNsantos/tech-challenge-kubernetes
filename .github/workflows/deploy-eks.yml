@@ -104,6 +104,11 @@ jobs:
           NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
           NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
         run: |
+          kubectl delete secret ghcr-secret \
+            -n "$NAMESPACE" \
+            --ignore-not-found
+
+
           kubectl create secret generic app-secrets \
             --namespace "$NAMESPACE" \
             --from-literal=APP_KEY="$APP_KEY" \
