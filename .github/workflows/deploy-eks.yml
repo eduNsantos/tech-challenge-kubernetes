@@ -46,6 +46,11 @@ jobs:
       - name: Update kubeconfig for EKS
         run: aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
 
+      - name: Apply non-secret Kubernetes config
+        run: |
+          kubectl apply -f k8s/00-namespaces/
+          kubectl apply -f k8s/01-config/configmap.yaml
+
       - name: Create GHCR pull secret if needed
         run: |
           kubectl create secret docker-registry ghcr-secret \
@@ -55,11 +60,6 @@ jobs:
             --docker-email=${{ secrets.GHCR_EMAIL }} \
             --namespace "$NAMESPACE" \
             --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Apply non-secret Kubernetes config
-        run: |
-          kubectl apply -f k8s/00-namespaces/
-          kubectl apply -f k8s/01-config/configmap.yaml
 
       - name: Create app secret from GitHub repository secrets
         run: |
