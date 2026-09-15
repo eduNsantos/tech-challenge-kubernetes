@@ -1,6 +1,9 @@
 name: Deploy to EKS
 
 on:
+  push:
+    branches:
+      - main
   repository_dispatch:
     types: [deploy-eks]
 
