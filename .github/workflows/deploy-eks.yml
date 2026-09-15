@@ -378,17 +378,6 @@ jobs:
       - name: Install yq
         uses: mikefarah/yq@v4
 
-      - name: Set application image
-        env:
-          IMAGE_TAG: ${{ needs.image.outputs.tag }}
-        run: |
-          yq eval \
-            '.spec.template.spec.containers[0].image = env(APP_IMAGE) + ":" + env(IMAGE_TAG)' \
-            k8s/02-app/deployment.yaml \
-            > /tmp/deployment.yaml
-
-          kubectl apply -f /tmp/deployment.yaml
-
       - name: Apply remaining application manifests
         run: |
           find k8s/02-app \
