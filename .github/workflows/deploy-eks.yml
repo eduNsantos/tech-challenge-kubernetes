@@ -55,7 +55,7 @@ jobs:
 
       - name: Terraform Init
         run: |
-          terraform init
+          terraform init -input=false
 
       - name: Terraform Apply
         working-directory: terraform
@@ -65,7 +65,8 @@ jobs:
           TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
         run: |
           terraform apply \
-            -auto-approve
+            -auto-approve \
+            -input=false
 
       # ---------------------------------------------------------
       # IMAGE TAG
