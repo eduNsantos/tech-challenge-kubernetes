@@ -177,6 +177,7 @@ jobs:
       - name: Apply ConfigMap
         run: |
           kubectl apply -f k8s/01-config/configmap.yaml
+          kubectl apply -f k8s/01-config/openapi-configmap.yaml
 
 
   # =======================================================

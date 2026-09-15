@@ -147,7 +147,7 @@ aws eks update-kubeconfig --name main --region us-east-1
 ```bash
 kubectl apply -f k8s/00-namespaces/
 kubectl apply -f k8s/01-config/configmap.yaml
-kubectl create configmap openapi-spec --from-file=openapi.yaml -n postech
+kubectl apply -f k8s/01-config/openapi-configmap.yaml
 
 cp k8s/01-config/secret.example.yaml k8s/01-config/secret.yaml
 # preencha secret.yaml com valores reais em base64 — nunca commitar
