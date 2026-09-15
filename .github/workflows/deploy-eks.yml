@@ -186,6 +186,20 @@ jobs:
           kubectl apply -f k8s/02-app
 
       # ---------------------------------------------------------
+      # NEW RELIC
+      # ---------------------------------------------------------
+      - name: Deploy New Relic Kubernetes integration
+        run: |
+          set -euo pipefail
+
+          helm repo add newrelic https://helm-charts.newrelic.com || true
+          helm repo update
+
+          helm upgrade --install newrelic-bundle \
+            newrelic/nri-bundle \
+            --namespace "$NAMESPACE" \
+            -f values-newrelic.yaml
+      # ---------------------------------------------------------
       # ROLLOUT
       # ---------------------------------------------------------
       - name: Rollout status

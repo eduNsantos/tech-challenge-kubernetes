@@ -1,7 +1,7 @@
 global:
   cluster: postech-k8s
 
-  customSecretName: ghcr-secret
+  customSecretName: app-secrets
   customSecretLicenseKey: NEW_RELIC_LICENSE_KEY
 
   lowDataMode: false
