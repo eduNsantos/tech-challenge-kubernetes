@@ -198,7 +198,7 @@ jobs:
           helm upgrade --install newrelic-bundle \
             newrelic/nri-bundle \
             --namespace "$NAMESPACE" \
-            -f values-newrelic.yaml
+            -f newrelic-values.yaml
       # ---------------------------------------------------------
       # ROLLOUT
       # ---------------------------------------------------------
