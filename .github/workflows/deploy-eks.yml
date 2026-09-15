@@ -64,7 +64,8 @@ jobs:
       - name: Terraform Init
         run: |
           terraform init \
-            -migrate-state \
+            -input=false \
+            -reconfigure \
             -lock-timeout=5m
 
       - name: Terraform Apply
