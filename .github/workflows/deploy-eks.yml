@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+
   repository_dispatch:
     types: [deploy-eks]
 
@@ -28,8 +29,44 @@ jobs:
       APP_IMAGE: ghcr.io/edunsantos/tech-challenge-application
 
     steps:
+      # ---------------------------------------------------------
+      # CHECKOUT
+      # ---------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # ---------------------------------------------------------
+      # AWS
+      # ---------------------------------------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ---------------------------------------------------------
+      # TERRAFORM
+      # ---------------------------------------------------------
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.5
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init
+
+      - name: Terraform Apply
+        working-directory: terraform
+        env:
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+        run: |
+          terraform apply \
+            -auto-approve
 
       # ---------------------------------------------------------
       # IMAGE TAG
@@ -51,15 +88,8 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       # ---------------------------------------------------------
-      # AWS
+      # EKS
       # ---------------------------------------------------------
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
       - name: Update kubeconfig for EKS
         run: |
           aws eks update-kubeconfig \
@@ -112,7 +142,6 @@ jobs:
           NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
           NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
         run: |
-
           kubectl delete secret app-secrets \
             -n "$NAMESPACE" \
             --ignore-not-found
@@ -141,13 +170,10 @@ jobs:
           echo "Running migration with:"
           echo "${APP_IMAGE}:${IMAGE_TAG}"
 
-          # Job é imutável, então sempre removemos o anterior
           kubectl delete job app-migrate \
             -n "$NAMESPACE" \
             --ignore-not-found
 
-          # Gera um arquivo temporário para não alterar
-          # o migrate-job.yaml do repositório
           yq eval \
             '.spec.template.spec.containers[0].image = env(APP_IMAGE) + ":" + env(IMAGE_TAG)' \
             k8s/02-app/migrate-job.yaml \
@@ -185,6 +211,9 @@ jobs:
             -n "$NAMESPACE" \
             --tail=200
 
+      # ---------------------------------------------------------
+      # APPLICATION
+      # ---------------------------------------------------------
       - name: Apply Application
         run: |
           kubectl apply -f k8s/02-app
@@ -203,10 +232,10 @@ jobs:
             newrelic/nri-bundle \
             --namespace "$NAMESPACE" \
             -f newrelic-values.yaml
+
       # ---------------------------------------------------------
       # ROLLOUT
       # ---------------------------------------------------------
-
       - name: Rollout deployment
         run: |
           kubectl rollout restart \
