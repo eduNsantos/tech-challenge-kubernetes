@@ -14,6 +14,11 @@ on:
         description: 'Image tag to deploy'
         required: false
         default: 'latest'
+      enable_services_ms:
+        description: 'Enable outbox publishing after the Services MS is deployed and healthy'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,7 +27,7 @@ permissions:
 # EVITA DOIS PIPELINES DE INFRA RODANDO AO MESMO TEMPO
 # ---------------------------------------------------------
 concurrency:
-  group: terraform-eks-state
+  group: eks-app-deploy
   cancel-in-progress: false
 
 env:
@@ -31,50 +36,7 @@ env:
   NAMESPACE: postech
   APP_IMAGE: ghcr.io/edunsantos/tech-challenge-application
 
-# =========================================================
-# TERRAFORM
-# =========================================================
 jobs:
-
-  terraform:
-    name: Terraform Apply
-    runs-on: ubuntu-latest
-
-    steps:
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.13.5
-
-      - name: Terraform Init
-        run: |
-          terraform init \
-            -input=false \
-            -reconfigure \
-            -lock-timeout=5m
-
-      - name: Terraform Apply
-        env:
-          TF_VAR_aws_region: ${{ env.AWS_REGION }}
-          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
-          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
-        run: |
-          terraform apply \
-            -auto-approve \
-            -input=false \
-            -lock-timeout=5m
-
 
   # =======================================================
   # IMAGE TAG
@@ -101,6 +63,11 @@ jobs:
             TAG="${INPUT_TAG:-latest}"
           fi
 
+          if [[ ! "$TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error::Invalid Docker image tag"
+            exit 1
+          fi
+
           echo "Deploying image tag: $TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
@@ -111,7 +78,6 @@ jobs:
   eks:
     name: Configure EKS
     runs-on: ubuntu-latest
-    needs: terraform
 
     steps:
 
@@ -120,6 +86,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install kubectl
@@ -157,6 +124,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install kubectl
@@ -175,8 +143,21 @@ jobs:
           kubectl apply -f k8s/00-namespaces/
 
       - name: Apply ConfigMap
+        env:
+          SERVICES_MS_ENABLED: ${{ inputs.enable_services_ms || 'false' }}
         run: |
-          kubectl apply -f k8s/01-config/configmap.yaml
+          set -euo pipefail
+          SQS_SERVICE_ORDERS_CREATED_URL="$(aws sqs get-queue-url \
+            --queue-name services-ms-service-orders-created.fifo \
+            --query QueueUrl --output text)"
+          SQS_SERVICE_ORDER_STATUS_CHANGED_URL="$(aws sqs get-queue-url \
+            --queue-name services-ms-service-order-status-changed.fifo \
+            --query QueueUrl --output text)"
+          sed \
+            -e "s|<SERVICES_MS_ENABLED>|${SERVICES_MS_ENABLED}|" \
+            -e "s|<SQS_SERVICE_ORDERS_CREATED_URL>|${SQS_SERVICE_ORDERS_CREATED_URL}|" \
+            -e "s|<SQS_SERVICE_ORDER_STATUS_CHANGED_URL>|${SQS_SERVICE_ORDER_STATUS_CHANGED_URL}|" \
+            k8s/01-config/configmap.yaml | kubectl apply -f -
           kubectl apply -f k8s/01-config/openapi-configmap.yaml
 
 
@@ -195,6 +176,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install kubectl
@@ -277,6 +259,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install kubectl
@@ -363,6 +346,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install kubectl
@@ -379,12 +363,21 @@ jobs:
       - name: Install yq
         uses: mikefarah/yq@v4
 
-      - name: Apply remaining application manifests
+      - name: Apply application and worker manifests
+        env:
+          IMAGE_TAG: ${{ needs.image.outputs.tag }}
         run: |
           find k8s/02-app \
             -type f \
-            ! -name "deployment.yaml" \
+            ! -name "app-deployment.yaml" \
+            ! -name "migrate-job.yaml" \
             -exec kubectl apply -f {} \;
+          sed "s|${APP_IMAGE}:latest|${APP_IMAGE}:${IMAGE_TAG}|" \
+            k8s/02-app/app-deployment.yaml | kubectl apply -f -
+          for manifest in k8s/04-services-ms/*.yaml; do
+            sed "s|${APP_IMAGE}:latest|${APP_IMAGE}:${IMAGE_TAG}|" \
+              "$manifest" | kubectl apply -f -
+          done
 
 
   # =======================================================
@@ -405,6 +398,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install kubectl
@@ -471,6 +465,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install kubectl
