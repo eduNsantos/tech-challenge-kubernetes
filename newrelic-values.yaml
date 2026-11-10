@@ -1,5 +1,6 @@
 global:
   cluster: postech-k8s
+  region: US
 
   customSecretName: app-secrets
   customSecretLicenseKey: NEW_RELIC_LICENSE_KEY
