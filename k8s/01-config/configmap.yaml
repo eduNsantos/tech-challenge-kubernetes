@@ -7,7 +7,11 @@ data:
   APP_NAME: "POS Tech"
   APP_ENV: "production"
   APP_DEBUG: "true"
+  # APP_URL e PAYMENT_SERVICE_URL são resolvidos no deploy (job rollout do deploy-eks.yml):
+  # ELB do Service postech-app e API Gateway "payment-service-api". Os valores abaixo são só fallback.
   APP_URL: "http://afcc3522133bf4c1ebd1adfe569a55d2-915103370.us-east-1.elb.amazonaws.com:8080"
+  PAYMENT_SERVICE_URL: ""
+  PAYMENT_SERVICE_TIMEOUT: "5"
   APP_LOCALE: "pt_BR"
   APP_FALLBACK_LOCALE: "en"
   APP_FAKER_LOCALE: "pt_BR"
