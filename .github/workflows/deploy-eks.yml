@@ -139,13 +139,68 @@ jobs:
           echo "Database deployment workflow was triggered successfully."
 
 
+  services-ms:
+    name: Deploy Services MS
+    runs-on: ubuntu-latest
+    needs: eks
+    timeout-minutes: 50
+
+    steps:
+      - name: Trigger and wait for Services MS
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          SERVICES_MS_REPO: eduNsantos/tech-challenge-services-ms
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Missing GHCR_TOKEN secret to trigger and monitor Services MS."
+            exit 1
+          fi
+
+          API_URL="https://api.github.com/repos/${SERVICES_MS_REPO}/actions"
+          response="$(curl -fsSL \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "$API_URL/workflows/ci-cd.yml/dispatches" \
+            -d '{"ref":"main"}')"
+          run_id="$(python3 -c 'import json, sys; run_id = json.load(sys.stdin)["workflow_run_id"]; assert isinstance(run_id, int) and not isinstance(run_id, bool) and run_id > 0; print(run_id)' <<< "$response")"
+          echo "Waiting for Services MS workflow run $run_id."
+
+          deadline=$((SECONDS + 2700))
+          while (( SECONDS < deadline )); do
+            response="$(curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "$API_URL/runs/$run_id")"
+            status="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["status"])' <<< "$response")"
+            if [ "$status" = "completed" ]; then
+              conclusion="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["conclusion"])' <<< "$response")"
+              if [ "$conclusion" = "success" ]; then
+                echo "Services MS deployment completed successfully."
+                exit 0
+              fi
+              echo "::error::Services MS workflow run $run_id concluded with $conclusion."
+              exit 1
+            fi
+            sleep 15
+          done
+
+          echo "::error::Timed out waiting for Services MS workflow run $run_id."
+          exit 1
+
+
   # =======================================================
   # CONFIGMAP / NAMESPACE
   # =======================================================
   config:
     name: Apply Kubernetes Config
     runs-on: ubuntu-latest
-    needs: eks
+    needs: services-ms
 
     steps:
 
