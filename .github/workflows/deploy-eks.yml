@@ -567,6 +567,67 @@ jobs:
             --name "$EKS_CLUSTER_NAME" \
             --region "$AWS_REGION"
 
+      # Resolve em tempo de deploy as URLs que mudam quando a infra é recriada:
+      #   PAYMENT_SERVICE_URL → API Gateway "payment-service-api" (tech-challenge-payment-service)
+      #   APP_URL             → hostname do ELB do Service postech-app (usado em callback_url/notification_url)
+      # vars.PAYMENT_SERVICE_URL / vars.APP_URL (Settings → Variables) sobrescrevem a descoberta.
+      - name: Resolve integration URLs
+        env:
+          PAYMENT_SERVICE_URL_OVERRIDE: ${{ vars.PAYMENT_SERVICE_URL }}
+          APP_URL_OVERRIDE: ${{ vars.APP_URL }}
+          PAYMENT_API_NAME: payment-service-api
+        run: |
+          set -euo pipefail
+
+          payment_url="${PAYMENT_SERVICE_URL_OVERRIDE:-}"
+          if [ -z "$payment_url" ]; then
+            payment_url=$(aws apigatewayv2 get-apis --region "$AWS_REGION" \
+              --query "Items[?Name=='${PAYMENT_API_NAME}'].ApiEndpoint | [0]" \
+              --output text 2>/dev/null || true)
+            [ "$payment_url" = "None" ] && payment_url=""
+          fi
+
+          app_url="${APP_URL_OVERRIDE:-}"
+          if [ -z "$app_url" ]; then
+            # ELB pode levar alguns segundos para ganhar hostname após a criação do Service
+            for _ in $(seq 1 24); do
+              lb_host=$(kubectl -n "$NAMESPACE" get svc postech-app \
+                -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+              [ -n "$lb_host" ] && break
+              sleep 5
+            done
+            if [ -n "${lb_host:-}" ]; then
+              lb_port=$(kubectl -n "$NAMESPACE" get svc postech-app -o jsonpath='{.spec.ports[0].port}')
+              app_url="http://${lb_host}:${lb_port}"
+            fi
+          fi
+
+          data=""
+          if [ -n "$payment_url" ]; then
+            data="\"PAYMENT_SERVICE_URL\":\"${payment_url%/}\""
+          else
+            echo "::warning::API '${PAYMENT_API_NAME}' não encontrada — envio de orçamento retornará 502 até o payment-service ser implantado."
+          fi
+          if [ -n "$app_url" ]; then
+            [ -n "$data" ] && data="${data},"
+            data="${data}\"APP_URL\":\"${app_url%/}\""
+          else
+            echo "::warning::Hostname do ELB não encontrado — mantendo APP_URL do configmap.yaml."
+          fi
+
+          if [ -n "$data" ]; then
+            kubectl -n "$NAMESPACE" patch configmap app-config --type merge -p "{\"data\":{${data}}}"
+          fi
+
+          {
+            echo "## URLs de integração"
+            echo "| Variável | Valor |"
+            echo "|---|---|"
+            echo "| \`PAYMENT_SERVICE_URL\` | \`${payment_url:-não resolvida}\` |"
+            echo "| \`APP_URL\` | \`${app_url:-mantida do configmap.yaml}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # O restart abaixo faz os pods lerem o configmap atualizado
       - name: Restart deployment
         run: |
           kubectl rollout restart \
