@@ -24,7 +24,7 @@ resource "aws_s3_bucket" "terraform_state" {
   tags = {
     Name      = var.state_bucket_name
     ManagedBy = "Terraform"
-    Purpose   = "Terraform state for EKS"
+    Purpose   = "Terraform state for tech-challenge repositories"
   }
 }
 
