@@ -53,6 +53,7 @@ fluxo de produção.
 | `k8s/02-app/app-hpa.yaml` | HPA: 2–4 réplicas, alvo 70% de CPU |
 | `k8s/02-app/migrate-job.yaml` | Job de `php artisan migrate`, rodado a cada deploy |
 | `k8s/02-app/swagger-deployment.yaml` + `swagger-service.yaml` | Swagger UI servindo o `openapi.yaml` |
+| `k8s/04-services-ms/` | Workers do monólito para publicar a outbox e consumir atualizações de status |
 
 ## Arquitetura
 
@@ -128,10 +129,34 @@ flowchart TB
 
 ## Passos para execução e deploy
 
+### State Terraform local (temporário)
+
+Por enquanto, a configuração principal usa o backend local e grava o state em
+`terraform.tfstate` neste diretório. O arquivo e seus backups são ignorados pelo
+Git; mantenha cópias de segurança protegidas, não os envie ao repositório e não
+execute Terraform em paralelo em outra máquina usando uma cópia diferente.
+
+Como o backend anterior era S3 e não pôde ser lido, a configuração local começa
+sem state remoto. Antes de aplicar, revise o inventário e o plano com cuidado:
+um state vazio pode fazer o Terraform propor criar recursos que já existam.
+Inicialize/reconfigure somente após confirmar que não há state local que deva
+ser preservado:
+
+```bash
+terraform init -reconfigure
+terraform plan
+# Revise o plano; nao aplique sem autorizacao.
+```
+
+O diretório `state-bootstrap/` é independente e tem seu próprio state local
+para o bucket parcialmente criado. Não copie nem misture esse state com o state
+do EKS. A migração futura para S3 deve ser planejada depois que o bucket e suas
+permissões forem validados e o state local do EKS estiver íntegro.
+
 ### 1. Provisionar a infraestrutura (uma vez, ou a cada mudança de Terraform)
 
 ```bash
-terraform init
+terraform init -reconfigure
 terraform plan
 terraform apply
 ```
@@ -156,25 +181,23 @@ kubectl apply -f k8s/01-config/secret.yaml
 kubectl apply -f k8s/02-app/
 ```
 
-### 4. Deploy contínuo (automático)
+### 4. Deploy da aplicação no EKS
 
-O deploy de uma nova versão da aplicação **não é manual**: o workflow
-`.github/workflows/deploy-eks.yml` é disparado por `repository_dispatch`
-(evento `deploy-eks`) enviado pelo `build-ghcr.yml` de
-`tech-challenge-application` após cada publicação de imagem no GHCR — ou
-manualmente via `workflow_dispatch`, informando a tag da imagem. A cada
-execução, o workflow:
-
-1. Configura o kubeconfig do cluster EKS.
-2. Cria/atualiza o Secret de pull do GHCR e o ConfigMap.
-3. Recria o Secret `ghcr-secret` a partir dos secrets do repositório GitHub.
-4. Roda o Job de migration (`migrate-job.yaml`) com a imagem nova e espera
-   ele completar.
-5. Atualiza a imagem do Deployment e faz o rollout.
+O workflow `.github/workflows/deploy-eks.yml` implanta a aplicação, as
+migrations e os workers do monólito; ele não executa Terraform. A publicação
+em `fase-4-eduardo` não inicia deploy automaticamente. Use
+`workflow_dispatch` nessa branch depois de publicar a imagem no GHCR, informando
+em `image_tag` a tag da branch (por exemplo, `fase-4-eduardo`; `latest` é
+reservada para builds de `main`).
+`enable_services_ms` deve permanecer `false` até o Services MS estar implantado
+e saudável; em seguida, execute novamente o workflow com `true` para habilitar
+a publicação de eventos da outbox. Os endereços das filas FIFO são consultados
+pela AWS CLI durante o deploy, sem armazená-los em Secrets.
 
 **Secrets necessários no repositório GitHub:** `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`, `GHCR_USERNAME`, `GHCR_TOKEN`, `GHCR_EMAIL`,
-`APP_KEY`, `DB_PASSWORD`, `JWT_SECRET`, `MAIL_USERNAME`, `MAIL_PASSWORD`.
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `GHCR_USERNAME`, `GHCR_TOKEN`,
+`GHCR_EMAIL`, `APP_KEY`, `DB_PASSWORD`, `JWT_SECRET`, `MAIL_USERNAME`,
+`MAIL_PASSWORD`.
 
 ## Acesso
 

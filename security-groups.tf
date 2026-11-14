@@ -40,6 +40,7 @@ resource "aws_vpc_security_group_ingress_rule" "eks_all" {
 
 resource "aws_vpc_security_group_ingress_rule" "allow_mysql_vpc" {
   security_group_id = aws_security_group.rds.id
+  description       = "Public MySQL access for the lab"
   cidr_ipv4         = "0.0.0.0/0"
   from_port         = 3306
   to_port           = 3306
