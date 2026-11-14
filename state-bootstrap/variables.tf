@@ -7,5 +7,5 @@ variable "aws_region" {
 variable "state_bucket_name" {
   description = "Globally unique S3 bucket name for the shared Terraform states."
   type        = string
-  default     = "techchallenge-tfstate-477478162709-eks"
+  default     = "techchallenge-tfstate-477478162709-v2"
 }
