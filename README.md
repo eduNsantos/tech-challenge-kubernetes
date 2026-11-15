@@ -53,13 +53,22 @@ fluxo de produção.
 | `k8s/02-app/app-hpa.yaml` | HPA: 2–4 réplicas, alvo 70% de CPU |
 | `k8s/02-app/migrate-job.yaml` | Job de `php artisan migrate`, rodado a cada deploy |
 | `k8s/02-app/swagger-deployment.yaml` + `swagger-service.yaml` | Swagger UI servindo o `openapi.yaml` |
-| `k8s/04-services-ms/` | Workers do monólito para publicar a outbox e consumir atualizações de status |
+| `app-lambda/` | Terraform das Lambdas da aplicação: `postech-outbox-publisher` (outbox → filas do Services MS) e `postech-execution-consumer` (fila de execução → aplicação) |
 
-O status consumer usa a ServiceAccount dedicada `postech-status-consumer`.
-Sua associação EKS Pod Identity e role de consumo da fila de status são
-definidas no Terraform do Services MS, desativadas por padrão e ainda sujeitas
-à revisão e aprovação antes do apply. Criar a ServiceAccount por si só não
-fornece credenciais; IRSA e Pod Identity são mecanismos distintos.
+### Lambdas da aplicação (`app-lambda/`)
+
+Os workers do monólito rodam em Lambda (PHP 8.4 via Bref 3), com state próprio
+(`application-lambda/terraform.tfstate`). O job `lambdas` do `deploy-eks.yml`
+roda depois das migrations:
+
+1. Roda `scripts/build-lambda.sh` dentro da imagem `ghcr.io/edunsantos/tech-challenge-application:<tag>`, a mesma do EKS, e gera `build/lambda` (sem dependências de dev).
+2. Roda `terraform test` (provider mockado) e `terraform plan` com `TF_VAR_db_password` (`DB_PASSWORD`) e `TF_VAR_app_key` (`APP_KEY`).
+3. Remove os Deployments antigos `postech-outbox-publisher` e `postech-execution-consumer` e aplica o plano.
+
+As filas pertencem ao Services MS e são lidas por data source, então o Terraform
+do Services MS precisa ter sido aplicado antes. Cada Lambda tem uma role
+própria com acesso mínimo à sua fila. As Lambdas rodam fora da VPC e acessam o
+RDS público do laboratório (`techchallenge-rds`).
 
 ## Arquitetura
 
