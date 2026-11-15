@@ -281,9 +281,8 @@ sucesso. Falha ou timeout impede a aplicação do ConfigMap. O segredo
 repositório `tech-challenge-services-ms`; seus próprios secrets de deploy
 também precisam estar configurados. Esse workflow valida o Terraform, mas não
 provisiona as filas SQS: elas devem existir antes do deploy.
-`enable_services_ms` deve permanecer `false` até o Services MS estar implantado
-e saudável; em seguida, execute novamente o workflow com `true` para habilitar
-a publicação de eventos da outbox. Os endereços das filas FIFO são consultados
+A integração com o Services MS fica sempre ligada (`SERVICES_MS_ENABLED=true`
+no ConfigMap): a publicação de eventos da outbox não depende de input. Os endereços das filas FIFO são consultados
 pela AWS CLI durante o deploy, sem armazená-los em Secrets.
 
 **Secrets necessários no repositório GitHub:** `AWS_ACCESS_KEY_ID`,
