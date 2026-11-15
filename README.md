@@ -23,7 +23,7 @@ fluxo de produção.
 | Infraestrutura como código | Terraform (`hashicorp/aws` ~> 6.0) |
 | Provedor cloud | AWS (região `us-east-1`) |
 | Rede | VPC, subnets públicas, Internet Gateway, Security Groups |
-| Orquestração de contêineres | AWS EKS 1.35 + node group EC2 (`t3.small`, 1–2 nós) |
+| Orquestração de contêineres | AWS EKS 1.35 + node group EC2 (`t3.medium`, 1–3 nós) |
 | Manifests de aplicação | Kubernetes YAML puro (Namespace, ConfigMap, Secret, Deployment, Service, HPA, Job) |
 | Registro de imagens | GitHub Container Registry (GHCR) |
 | CI/CD | GitHub Actions (`.github/workflows/deploy-eks.yml`) |
@@ -38,7 +38,8 @@ fluxo de produção.
 | `vpc.tf` | VPC `main` + 2 subnets públicas (`sub_a`, `sub_b`) |
 | `internet-gateway.tf` | Internet Gateway + rota pública |
 | `security-groups.tf` | Security Groups `eks` (tráfego interno + portas 8080/8082 liberadas para IP fixo) e `rds` (o mesmo referenciado como `data source` por [`tech-challenge-database`](https://github.com/eduNsantos/tech-challenge-database)) |
-| `eks.tf` | Cluster EKS 1.35 + node group (`t3.small`, 1–2 nós) + IAM roles/policies do cluster e dos nodes |
+| `eks.tf` | Cluster EKS 1.35 + node group (`t3.medium`, 1–3 nós, 2 desejados) + IAM roles/policies do cluster e dos nodes |
+| `tests/eks.tftest.hcl` | Testes do Terraform com provider mockado (ver [Testes do Terraform](#testes-do-terraform)) |
 
 ### Kubernetes (aplicação)
 
@@ -86,7 +87,7 @@ flowchart TB
 
             subgraph SUBA["subnet sub_a (us-east-1a)"]
                 subgraph EKS["EKS Cluster main (v1.35)"]
-                    NG["Node group main-ng\nt3.small, 1-2 nós\nSG: eks"]
+                    NG["Node group main-ng\nt3.medium, 1-3 nós\nSG: eks"]
 
                     subgraph NS["Namespace postech"]
                         CM["ConfigMap\napp-config / openapi"]
@@ -227,6 +228,38 @@ revise o plano completo e, somente após aprovação, aplique com a mesma variá
 Mantenha a variável ativada nos futuros plans/applies se quiser preservar esses
 outputs. Alternativamente, consulte as URLs diretamente com `terraform output`
 em `tech-challenge-services-ms/infra`, sem alterar o Terraform do Kubernetes.
+
+### Testes do Terraform
+
+[`tests/eks.tftest.hcl`](tests/eks.tftest.hcl) valida o Terraform raiz com
+`terraform test` e provider AWS mockado. Ele não usa credenciais nem cria
+recursos. Cobre:
+
+- **Rede**: VPC com DNS habilitado, duas subnets públicas em AZs diferentes e rota `0.0.0.0/0` pelo Internet Gateway.
+- **Security groups**: `eks` libera 8080–8082/tcp; `rds` aceita 3306 vindo do SG do EKS; output `eks_security_group_id`.
+- **Cluster EKS**: versão 1.35, autenticação `API`, role confiando em `eks.amazonaws.com` e acesso de admin para quem roda o Terraform.
+- **Node group**: `t3.medium` nas duas subnets, `min <= desired <= max` e policies de worker, CNI e ECR.
+- **Filas do Services MS**: não são consultadas por padrão; com `lookup_services_ms_queues=true` os outputs expõem as URLs.
+
+```bash
+terraform fmt -check -recursive
+terraform init -backend=false -input=false
+terraform test
+```
+
+`-backend=false` evita acessar o bucket S3 do state. Rode o teste antes de
+qualquer `plan`/`apply`. As Lambdas em `app-lambda/` têm testes próprios: rode
+os mesmos comandos dentro desse diretório.
+
+No CI, o job **Terraform Test** é a primeira etapa do `deploy-eks.yml` e roda
+os dois testes. Todos os outros jobs dependem dele, então o deploy não começa se
+um teste falhar. Em pull requests para `main`, o workflow roda **apenas** esse
+job, sem credenciais AWS e sem deploy.
+
+Para exigir o teste antes do merge, configure a branch protection de `main`
+(Settings → Branches → *Require status checks to pass before merging*) e
+marque o check `Terraform Test`. O check só aparece na busca depois de rodar
+uma vez em algum PR.
 
 ### 1. Provisionar a infraestrutura (uma vez, ou a cada mudança de Terraform)
 
