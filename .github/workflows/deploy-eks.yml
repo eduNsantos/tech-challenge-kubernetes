@@ -5,6 +5,11 @@ on:
     branches:
       - main
 
+  # Em PR roda só o job "Terraform Test" (exigido pela branch protection).
+  pull_request:
+    branches:
+      - main
+
   repository_dispatch:
     types: [deploy-eks]
 
@@ -22,8 +27,9 @@ permissions:
 # EVITA DOIS PIPELINES DE INFRA RODANDO AO MESMO TEMPO
 # ---------------------------------------------------------
 concurrency:
-  group: eks-app-deploy
-  cancel-in-progress: false
+  # PRs não entram na fila do deploy; um novo push no PR cancela o teste anterior.
+  group: ${{ github.event_name == 'pull_request' && format('eks-pr-{0}', github.ref) || 'eks-app-deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   AWS_REGION: us-east-1
@@ -34,11 +40,44 @@ env:
 jobs:
 
   # =======================================================
+  # TERRAFORM TEST (provider mockado, sem credenciais AWS)
+  # =======================================================
+  terraform-test:
+    name: Terraform Test
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.5"
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform test (EKS / rede)
+        run: |
+          terraform init -backend=false -input=false
+          terraform test
+
+      - name: Terraform test (app-lambda)
+        working-directory: app-lambda
+        run: |
+          terraform init -backend=false -input=false
+          terraform test
+
+  # =======================================================
   # IMAGE TAG
   # =======================================================
   image:
     name: Define Image Tag
     runs-on: ubuntu-latest
+    needs: terraform-test
+    if: github.event_name != 'pull_request'
 
     outputs:
       tag: ${{ steps.image.outputs.tag }}
@@ -73,6 +112,8 @@ jobs:
   eks:
     name: Configure EKS
     runs-on: ubuntu-latest
+    needs: terraform-test
+    if: github.event_name != 'pull_request'
 
     steps:
 
