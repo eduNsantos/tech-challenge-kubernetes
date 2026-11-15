@@ -9,3 +9,5 @@ crash.*.log
 *.tfvars
 *.tfvars.json
 k8s/**/secret.yaml
+# Pacote das Lambdas da aplicação (gerado no deploy)
+build/
