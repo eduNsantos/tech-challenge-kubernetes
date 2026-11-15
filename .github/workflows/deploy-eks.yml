@@ -14,11 +14,6 @@ on:
         description: 'Image tag to deploy'
         required: false
         default: 'latest'
-      enable_services_ms:
-        description: 'Enable outbox publishing after the Services MS is deployed and healthy'
-        required: true
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -175,10 +170,10 @@ jobs:
 
       - name: Apply ConfigMap
         env:
-          SERVICES_MS_ENABLED: ${{ inputs.enable_services_ms || 'false' }}
+          SERVICES_MS_ENABLED: "true"
         run: |
           set -euo pipefail
-          
+
           # Obter URLs das SQS
           SQS_SERVICE_ORDERS_CREATED_URL="$(aws sqs get-queue-url \
             --queue-name services-ms-service-orders-created.fifo \
@@ -189,13 +184,13 @@ jobs:
           SQS_SERVICE_ORDER_EXECUTION_URL="$(aws sqs get-queue-url \
             --queue-name services-ms-service-order-execution.fifo \
             --query QueueUrl --output text)"
-          
+
           # Obter endpoint do RDS
           DB_HOST="$(aws rds describe-db-instances \
             --db-instance-identifier techchallenge-rds \
             --query 'DBInstances[0].Endpoint.Address' \
             --output text 2>/dev/null || echo '')"
-          
+
           # Obter APP_URL do ELB (aguardar se necessário)
           APP_URL=""
           for _ in $(seq 1 12); do
@@ -208,18 +203,18 @@ jobs:
             fi
             sleep 5
           done
-          
+
           # Se APP_URL ainda não foi resolvido, usar fallback
           if [ -z "$APP_URL" ]; then
             echo "::warning::APP_URL não pode ser resolvido do ELB"
             APP_URL="http://localhost:8080"
           fi
-          
+
           # Obter PAYMENT_SERVICE_URL do API Gateway
           PAYMENT_SERVICE_URL="$(aws apigatewayv2 get-apis --region us-east-1 \
             --query "Items[?Name=='payment-service-api'].ApiEndpoint | [0]" \
             --output text 2>/dev/null || echo '')"
-          
+
           echo "Variables resolved:"
           echo "  SERVICES_MS_ENABLED: ${SERVICES_MS_ENABLED}"
           echo "  DB_HOST: ${DB_HOST}"
@@ -228,7 +223,7 @@ jobs:
           echo "  SQS_SERVICE_ORDERS_CREATED_URL: ${SQS_SERVICE_ORDERS_CREATED_URL}"
           echo "  SQS_SERVICE_ORDER_STATUS_CHANGED_URL: ${SQS_SERVICE_ORDER_STATUS_CHANGED_URL}"
           echo "  SQS_SERVICE_ORDER_EXECUTION_URL: ${SQS_SERVICE_ORDER_EXECUTION_URL}"
-          
+
           # Substituir placeholders no ConfigMap
           sed \
             -e "s|<SERVICES_MS_ENABLED>|${SERVICES_MS_ENABLED}|" \

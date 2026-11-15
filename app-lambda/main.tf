@@ -32,16 +32,18 @@ locals {
     APP_LOCALE                = "pt_BR"
     LOG_CHANNEL               = "stderr"
     BREF_LARAVEL_OMIT_INITLOG = "1"
-    DB_CONNECTION             = "mysql"
-    DB_HOST                   = data.aws_db_instance.app.address
-    DB_PORT                   = tostring(data.aws_db_instance.app.port)
-    DB_DATABASE               = var.db_name
-    DB_USERNAME               = var.db_username
-    DB_PASSWORD               = var.db_password
-    QUEUE_CONNECTION          = "database"
-    CACHE_STORE               = "database"
-    MAIL_MAILER               = "log"
-    NEW_RELIC_ENABLED         = "false"
+    # Obrigatória nas layers do Bref 3: escolhe o runtime de funções (handlers PHP).
+    BREF_RUNTIME      = "Bref\\FunctionRuntime\\Main"
+    DB_CONNECTION     = "mysql"
+    DB_HOST           = data.aws_db_instance.app.address
+    DB_PORT           = tostring(data.aws_db_instance.app.port)
+    DB_DATABASE       = var.db_name
+    DB_USERNAME       = var.db_username
+    DB_PASSWORD       = var.db_password
+    QUEUE_CONNECTION  = "database"
+    CACHE_STORE       = "database"
+    MAIL_MAILER       = "log"
+    NEW_RELIC_ENABLED = "false"
     # O consumer grava a mudança para "finalizada" na outbox; precisa da integração ligada.
     SERVICES_MS_ENABLED                  = "true"
     SQS_SERVICE_ORDERS_CREATED_URL       = data.aws_sqs_queue.services_ms["service_orders_created"].url
